@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Chess Kayu HD + AI + Sound</title>
+  <link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css" />
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      color: #eee;
+      font-family: sans-serif;
+    }
+    #board {
+      width: 80vmin;
+      box-shadow: 0 0 30px rgba(0,0,0,0.8);
+      border-radius: 12px;
+      animation: breathe 4s ease-in-out infinite;
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(1); }
+      50%      { transform: scale(1.02); }
+    }
+    #status {
+      position: absolute;
+      top: 1rem; right: 1rem;
+      background: rgba(0,0,0,0.5);
+      padding: .5rem 1rem;
+      border-radius: .5rem;
+    }
+
+    .white-1e1d7 {
+      background-image: url('https://upload.wikimedia.org/wikipedia/commons/9/91/Light_wood_texture.jpg');
+      background-size: cover;
+    }
+
+    .black-3c85d {
+      background-image: url('https://upload.wikimedia.org/wikipedia/commons/0/05/Dark_wood_texture.jpg');
+      background-size: cover;
+    }
+
+    .square-55d63.highlight {
+      background: rgba(255,255,0,0.4) !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Loading…</div>
+  <div id="board"></div>
+
+  <!-- Suara -->
+  <audio id="sfx-move" src="https://freesound.org/data/previews/458/458409_8386276-lq.mp3"></audio>
+  <audio id="sfx-capture" src="https://freesound.org/data/previews/178/178186_2193260-lq.mp3"></audio>
+  <audio id="sfx-check" src="https://freesound.org/data/previews/331/331912_3248244-lq.mp3"></audio>
+
+  <script src="https://unpkg.com/chess.js@1.0.0/chess.js"></script>
+  <script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <script>
+    const game = new Chess();
+    const board = Chessboard('board', {
+      draggable: true,
+      position: 'start',
+      pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+      onDragStart,
+      onDrop,
+      onMouseoutSquare: onMouseoutSq,
+      onMouseoverSquare: onMouseoverSq
+    });
+
+    const statusEl = document.getElementById('status');
+
+    function updateStatus() {
+      let status = '';
+      if (game.in_checkmate()) {
+        status = 'Checkmate. ' + (game.turn() === 'b' ? 'White' : 'Black') + ' wins!';
+      } else if (game.in_draw()) {
+        status = 'Draw!';
+      } else {
+        status = (game.turn() === 'w' ? 'White' : 'Black') + ' to move';
+        if (game.in_check()) status += ' (Check)';
+      }
+      statusEl.textContent = status;
+    }
+
+    function onDragStart(source, piece) {
+      if (game.game_over() || piece[0] !== 'w') return false;
+    }
+
+    function onDrop(source, target) {
+      const move = game.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) return 'snapback';
+
+      playSound(move.flags.includes('c') ? 'capture' : 'move');
+      if (game.in_check()) playSound('check');
+
+      board.position(game.fen());
+      updateStatus();
+      setTimeout(makeBestAIMove, 300);
+    }
+
+    function onMouseoverSq(square) {
+      const moves = game.moves({ square, verbose: true });
+      if (!moves.length) return;
+      moves.forEach(move => {
+        document.querySelectorAll('.square-' + move.to)
+          .forEach(el => el.classList.add('highlight'));
+      });
+    }
+
+    function onMouseoutSq(square) {
+      document.querySelectorAll('.highlight')
+        .forEach(el => el.classList.remove('highlight'));
+    }
+
+    function playSound(type) {
+      const audioMap = {
+        move: document.getElementById('sfx-move'),
+        capture: document.getElementById('sfx-capture'),
+        check: document.getElementById('sfx-check')
+      };
+      if (audioMap[type]) {
+        audioMap[type].currentTime = 0;
+        audioMap[type].play();
+      }
+    }
+
+    // === Stockfish AI ===
+    const stockfish = new Worker("https://cdn.jsdelivr.net/gh/niklasf/stockfish.wasm/stockfish.js");
+
+    function makeBestAIMove() {
+      if (game.game_over()) return;
+
+      stockfish.postMessage("position fen " + game.fen());
+      stockfish.postMessage("go depth 12");
+
+      stockfish.onmessage = function(event) {
+        const line = event.data;
+        if (line.startsWith("bestmove")) {
+          const moveStr = line.split(" ")[1];
+          const move = game.move({ from: moveStr.substr(0, 2), to: moveStr.substr(2, 2), promotion: 'q' });
+
+          if (move) {
+            playSound(move.flags.includes('c') ? 'capture' : 'move');
+            if (game.in_check()) playSound('check');
+          }
+
+          board.position(game.fen());
+          updateStatus();
+        }
+      };
+    }
+
+    updateStatus();
+  </script>
+</body>
+</html>
